@@ -7,8 +7,7 @@ import (
 )
 
 func miniHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("server-C ...")
-	w.Write([]byte("hello world"))
+	w.Write([]byte("Server C \n"))
 }
 
 func main() {
