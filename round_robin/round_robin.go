@@ -32,4 +32,20 @@ func (r *RoundRobin) UpdateTotal(value int) {
 
 	r.mutexTotal.Unlock()
 
+	if r.Current >= r.Total {
+		r.mutexCurrent.Lock()
+
+		r.Current = 0
+
+		r.mutexCurrent.Unlock()
+	}
+
+}
+
+func (r *RoundRobin) GetTotal() int {
+	return r.Total
+}
+
+func (r *RoundRobin) GetCurrent() int {
+	return r.Current
 }

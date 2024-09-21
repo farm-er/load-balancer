@@ -29,11 +29,22 @@ type Service struct {
 // it locks before wrting so it's safe to use asynchronously
 func (s *Service) DeleteInstance(index int) {
 
+	if index < 0 || index >= len(s.Instances) {
+		log.Fatal("Error in instances management")
+	}
+
 	s.InstancesMutex.Lock()
 
-	s.Instances = append(s.Instances[:index], s.Instances[index+1:]...)
+	if len(s.Instances) == 1 {
+		s.Instances = []*Instance{}
+	} else if len(s.Instances)-1 == index {
+		s.Instances = s.Instances[:index]
+	} else {
+		s.Instances = append(s.Instances[:index], s.Instances[index+1:]...)
+	}
 
 	s.InstancesMutex.Unlock()
+
 }
 
 // checks if an instance is alive
