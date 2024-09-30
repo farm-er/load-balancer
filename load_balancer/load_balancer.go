@@ -119,45 +119,13 @@ func (l *LoadBalancer) InitialHealthCheck() {
 		conn.Close()
 	}
 
-	// TODO: if number of instances is zero the Load Balancer will stop
+	// DONE: if number of instances is zero the Load Balancer will stop
 
 	if l.Strategy.GetTotal() == 0 {
 		log.Printf("No instance is responding please check your servers")
 		os.Exit(0)
 	}
 
-}
-
-func (l *LoadBalancer) ServeHTTP(res http.ResponseWriter, r *http.Request) {
-
-	// do a health before using the service
-
-	healthy := false
-
-	next := l.Strategy.Next()
-
-	for !healthy {
-
-		healthy = l.Service.healthCheckInstance(next)
-
-		if !healthy {
-			l.Strategy.UpdateTotal(-1)
-			next = l.Strategy.GetCurrent()
-			if l.Strategy.GetTotal() == 0 {
-
-				// TODO: need to terminate the process or if we added the recovery will wait for
-				// instances in recovery and resume after one is responding
-				l.SwitchToRecovery()
-
-				// need to return a response showing all the servers are down
-
-				return
-			}
-			continue
-		}
-	}
-
-	l.Service.Instances[next].Proxy.ServeHTTP(res, r)
 }
 
 func (l *LoadBalancer) Start() {
@@ -184,4 +152,22 @@ func (l *LoadBalancer) SwitchToRecovery() {
 	fmt.Printf("there are no instances available the service will switch to recovery mode")
 
 	fmt.Printf("switched to RECOVERY MODE")
+}
+
+// TODO: need to change the way we handle requests to use the local channels of every instance
+// we will just dump the pair of response writer and request to the channel of the node
+// the health check will be done locally in the node
+func (l *LoadBalancer) ServeHTTP(res http.ResponseWriter, r *http.Request) {
+
+	// moving to the next channel
+	next := l.Strategy.Next()
+
+	// dumping the res a r to the instance's local channel
+	l.Service.Instances[next].WaitingList <- struct {
+		res http.ResponseWriter
+		r   *http.Request
+	}{
+		res: res,
+		r:   r,
+	}
 }
