@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	port     = flag.String("port", "8080", "port for the load balancer")
+	port     = flag.String("port", "1234", "port for the load balancer")
 	name     = flag.String("name", "", "name of the service")
 	strategy = flag.String("strategy", "round-robin", "the algorithm to use default: round-robin")
 )

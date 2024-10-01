@@ -65,6 +65,10 @@ func NewLoadBalancer(urls []string, strategy, port, name string) (*LoadBalancer,
 		instances = append(instances, &Instance{
 			Proxy: httputil.NewSingleHostReverseProxy(url),
 			Url:   url,
+			WaitingList: make(chan struct {
+				res http.ResponseWriter
+				r   *http.Request
+			}, 100),
 		})
 
 	}
@@ -130,7 +134,7 @@ func (l *LoadBalancer) InitialHealthCheck() {
 
 func (l *LoadBalancer) Start() {
 
-	// TODO: add health check before starting the load balancer
+	// DONE: add health check before starting the load balancer
 
 	l.InitialHealthCheck()
 
@@ -138,6 +142,10 @@ func (l *LoadBalancer) Start() {
 		Addr:    ":" + l.Port,
 		Handler: l,
 	}
+
+	log.Printf("Starting the service")
+
+	l.Service.StartService()
 
 	fmt.Println("Load balancer running on port " + l.Port)
 
@@ -161,6 +169,8 @@ func (l *LoadBalancer) ServeHTTP(res http.ResponseWriter, r *http.Request) {
 
 	// moving to the next channel
 	next := l.Strategy.Next()
+
+	log.Printf("dumping request in %v", next)
 
 	// dumping the res a r to the instance's local channel
 	l.Service.Instances[next].WaitingList <- struct {

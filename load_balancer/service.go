@@ -1,6 +1,7 @@
 package loadbalancer
 
 import (
+	"errors"
 	"log"
 	"net"
 	"net/http"
@@ -15,7 +16,6 @@ import (
 // multiple of these build a service that needs load balancing
 // DONE: will change how requests are served
 // i'm going to add a channel for every instance and the load balancer will work with the channels
-// TODO: i need to pass a delete instance function from the service.
 type Instance struct {
 	Url *url.URL
 
@@ -31,27 +31,36 @@ type Instance struct {
 // and this function will be local to every instance
 // maybe send a copy to a local databse for metrics
 // DONE: add health check
-// TODO: delete the instance
-// TODO: manage the requests in the queue
-func (i *Instance) serveHTTP() {
+// when the node fails we return an error
+func (i *Instance) serveHTTP() error {
+
 	for r := range i.WaitingList {
-		i.healthCheck()
+
+		if !i.healthCheck() {
+			return errors.New("instance failure")
+		}
+
 		i.Proxy.ServeHTTP(r.res, r.r)
+
 	}
+
+	return nil
 }
 
 // DONE: localizing health checks to instance level
 // need this health check before every request
-func (i *Instance) healthCheck() {
+// returns true if the node is healthy and false if not
+func (i *Instance) healthCheck() bool {
 
 	conn, err := net.DialTimeout("tcp", i.Url.Host, 2*time.Second)
 
 	if err != nil {
 		log.Printf("Instance with url: %s is not responding and it's removed from the waiting list", i.Url)
-		return
+		return false
 	}
 
 	conn.Close()
+	return true
 }
 
 // the service that needs load balancing
@@ -83,4 +92,25 @@ func (s *Service) DeleteInstance(index int) {
 	}
 
 	s.InstancesMutex.Unlock()
+}
+
+// DONE: centralize the serving of requests in the service
+// so we can manage failures
+func (s *Service) StartService() {
+
+	for index, instance := range s.Instances {
+
+		go func(i *Instance) {
+			log.Printf("instance %v is running", index)
+			if err := i.serveHTTP(); err != nil {
+				// handle instance failure
+				// TODO: we need to print the problem and first recheck if the instance is really out
+				// then proceed to delete it from the list and copy the request over to serve them in the other nodes
+
+				log.Printf("Instance failure with url: %s", i.Url)
+			}
+		}(instance)
+
+	}
+
 }
