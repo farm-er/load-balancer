@@ -76,6 +76,14 @@ type LoadBalancer struct {
 	// mutex to write to Instances
 	InstancesMutex sync.RWMutex
 
+	
+	// Here we have the dead instances that we will check 
+	DeadInstances []Instance
+
+
+	// dead instances array mutex 
+	DeadInstancesMutex sync.RWMutex
+
 }
 
 func NewLoadBalancer(urls []string, strategy, port, name string) (*LoadBalancer, error) {
@@ -184,10 +192,6 @@ func (l *LoadBalancer) Start() {
 
 				l.deleteInstance( index, req)
 
-				if len(l.Instances) == 0 {
-					// DONE: if no instance is alive we're going to change mode to recovery
-					l.Mode = RECOVERY_MODE
-				}
 			}
 		}(instance)
 
@@ -196,6 +200,9 @@ func (l *LoadBalancer) Start() {
 
 	// Start the emergency channel worker here
 	go l.relieveEmergencyChannel()
+
+
+	go l.recovery()
 
 	fmt.Println("Load balancer running on port " + l.Port)
 
@@ -264,6 +271,12 @@ func (l *LoadBalancer) deleteInstance( index int, req *WaitingRequest) {
 		l.EmergencyChan <- item 
 	}
 
+	l.DeadInstancesMutex.Lock()
+
+	// move it to dead instances
+	l.DeadInstances = append(l.DeadInstances, l.Instances[index])
+
+	l.DeadInstancesMutex.Unlock()
 	// deleting the instance 
 	l.InstancesMutex.Lock()
 
@@ -282,12 +295,7 @@ func (l *LoadBalancer) deleteInstance( index int, req *WaitingRequest) {
 }
 
 
-
-
-
-
-// TODO: add a function to take care of the emergency channel 
-// this function will take the strategy into 
+// DONE: add a function to take care of the emergency channel 
 func (l *LoadBalancer) relieveEmergencyChannel() {
 
 	for req := range l.EmergencyChan {
@@ -308,6 +316,64 @@ func (l *LoadBalancer) relieveEmergencyChannel() {
 }
 
 
+// This function will health-check all dead instances for any recovery 
+func (l *LoadBalancer) recovery() {
+
+	for {
+		if len(l.DeadInstances) == 0 {
+			continue
+		}
+
+		for i, ins := range l.DeadInstances {
+
+			conn, err := net.DialTimeout("tcp", ins.Url.Host, 2*time.Second)
+
+			if err != nil {
+				// if the instance still not responding we will continue 
+				continue
+			}
+			
+			conn.Close()
+			// we need to create another channel because we closed it before 
+			
+			l.DeadInstancesMutex.Lock()
+
+			if len(l.DeadInstances) == 1 {
+				l.DeadInstances = []Instance{}
+			} else if len(l.DeadInstances)-1 == i {
+				l.DeadInstances = l.DeadInstances[:i]
+			} else {
+				l.DeadInstances = append(l.DeadInstances[:i], l.DeadInstances[i+1:]...)
+			}
+ 
+
+			l.DeadInstancesMutex.Unlock()
+
+			ins.WaitingList = make(chan WaitingRequest, 100)
+
+			l.InstancesMutex.Lock()
+			
+			l.Instances = append(l.Instances, ins)
+
+			go func(i Instance) {
+				log.Printf("Instance with url %s is back to work.", i.Url)
+				if req, err := i.redirect(); err != nil {
+					// handle instance failure
+					// DONE: copy the request over to serve them in the other nodes
+
+					l.deleteInstance( len(l.Instances)-1, req)
+
+				}
+			}(ins)
+
+			l.InstancesMutex.Unlock()
+
+			l.Strategy.UpdateTotal(len(l.Instances))
+		}
+
+	}
+
+}
 
 
 
