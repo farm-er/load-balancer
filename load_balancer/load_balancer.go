@@ -212,17 +212,19 @@ func (l *LoadBalancer) Start() {
 
 }
 
-func (l *LoadBalancer) SwitchToRecovery() {
-	l.Mode = RECOVERY_MODE
-	fmt.Printf("there are no instances available the service will switch to recovery mode")
-
-	fmt.Printf("switched to RECOVERY MODE")
-}
 
 // DONE: need to change the way we handle requests to use the local channels of every instance
 // we will just dump the pair of response writer and request to the channel of the node
 // the health check will be done locally in the node
 func (l *LoadBalancer) ServeHTTP(res http.ResponseWriter, r *http.Request) {
+
+
+	if l.Mode == RECOVERY_MODE {
+		
+		// we will do a response for no service available
+		// TODO: setup response for no service 
+		return 
+	}
 
 	// moving to the next channel
 	next := l.Strategy.Next()
@@ -352,9 +354,12 @@ func (l *LoadBalancer) recovery() {
 			ins.WaitingList = make(chan WaitingRequest, 100)
 
 			l.InstancesMutex.Lock()
+
 			
 			l.Instances = append(l.Instances, ins)
-
+			if len(l.Instances) == 1 {
+				l.Mode = NORMAL_MODE
+			}
 			go func(i Instance) {
 				log.Printf("Instance with url %s is back to work.", i.Url)
 				if req, err := i.redirect(); err != nil {
