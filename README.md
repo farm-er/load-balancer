@@ -15,8 +15,9 @@
 
 ## Introduction
 
-- Load Balancers can help improve the system's availability and ressource management by deviding the load evenly and mproving response time.
+- Load Balancers can help improve the system's availability and ressource management by deviding the load evenly to achieve a minimal response time.
 
+- This projects is implemented in a way that can support multiple algorithms out of the box, and a flexible design to let users add their own algorithms.
 
 ## Sources
 
