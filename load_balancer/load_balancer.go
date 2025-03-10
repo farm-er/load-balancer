@@ -35,11 +35,10 @@ const (
 	RECOVERY_MODE
 )
 
-
 // DONE: Create a new type for the combination of request, responseWriter, and finished channel
 
 // This type represent a request in waiting list of instances
-// and also in the load balancer's emergency list 
+// and also in the load balancer's emergency list
 type WaitingRequest struct {
 
 	// Combination of request and responseWriter that we got from the handlers
@@ -47,9 +46,8 @@ type WaitingRequest struct {
 
 	r *http.Request
 
-	// a channel to signal to the handler that request processing is finished 
+	// a channel to signal to the handler that request processing is finished
 	finished chan bool
-
 }
 
 // the load balancer instance that will do the work
@@ -59,7 +57,6 @@ type LoadBalancer struct {
 	// on which port the Load Balancer is running
 	Port string
 
-
 	// the algorithm used
 	Strategy Strategy
 
@@ -67,8 +64,7 @@ type LoadBalancer struct {
 	Mode int
 
 	// here the Load Balancer will requests from dead instances
-	EmergencyChan chan WaitingRequest 
-
+	EmergencyChan chan WaitingRequest
 
 	// User's servers
 	Instances []Instance
@@ -76,14 +72,11 @@ type LoadBalancer struct {
 	// mutex to write to Instances
 	InstancesMutex sync.RWMutex
 
-	
-	// Here we have the dead instances that we will check 
+	// Here we have the dead instances that we will check
 	DeadInstances []Instance
 
-
-	// dead instances array mutex 
+	// dead instances array mutex
 	DeadInstancesMutex sync.RWMutex
-
 }
 
 func NewLoadBalancer(urls []string, strategy, port, name string) (*LoadBalancer, error) {
@@ -100,10 +93,10 @@ func NewLoadBalancer(urls []string, strategy, port, name string) (*LoadBalancer,
 		instances = append(instances, Instance{
 			// Proxy to redirect traffic
 			Proxy: httputil.NewSingleHostReverseProxy(url),
-			// server's URL 
-			Url:   url,
-			// The instance will listen to this channel for any requests 
-			WaitingList: make( chan WaitingRequest, 100),
+			// server's URL
+			Url: url,
+			// The instance will listen to this channel for any requests
+			WaitingList: make(chan WaitingRequest, 100),
 		})
 
 	}
@@ -111,7 +104,7 @@ func NewLoadBalancer(urls []string, strategy, port, name string) (*LoadBalancer,
 	var loadStrategy Strategy
 
 	// Will use the strategy based on user's choice
-	// All strategies are under the Strategy interface 
+	// All strategies are under the Strategy interface
 	switch strategy {
 	case "round-robin":
 		loadStrategy = &roundrobin.RoundRobin{
@@ -119,16 +112,16 @@ func NewLoadBalancer(urls []string, strategy, port, name string) (*LoadBalancer,
 			Total:   len(instances),
 		}
 	default:
-		return nil, errors.New("")
+		return nil, errors.New("unknown strategy")
 	}
 
-	// return the load balancer instance ready to start 
+	// return the load balancer instance ready to start
 	return &LoadBalancer{
-		Port:     port,
-		Strategy: loadStrategy,	
-		Mode: NORMAL_MODE,
+		Port:          port,
+		Strategy:      loadStrategy,
+		Mode:          NORMAL_MODE,
 		EmergencyChan: make(chan WaitingRequest, 100),
-		Instances: instances,
+		Instances:     instances,
 	}, nil
 }
 
@@ -146,7 +139,7 @@ func (l *LoadBalancer) InitialHealthCheck() {
 			log.Printf("Instance %v with url: %s is not responding and it's removed from the waiting list", i, instance.Url)
 
 			// remove the instance from the service
-			l.deleteInstance(i - deleted, nil)
+			l.deleteInstance(i-deleted, nil)
 
 			// update total
 			l.Strategy.UpdateTotal(len(l.Instances))
@@ -181,7 +174,6 @@ func (l *LoadBalancer) Start() {
 
 	log.Printf("Starting the service")
 
-
 	for index, instance := range l.Instances {
 
 		go func(i Instance) {
@@ -190,17 +182,15 @@ func (l *LoadBalancer) Start() {
 				// handle instance failure
 				// DONE: copy the request over to serve them in the other nodes
 
-				l.deleteInstance( index, req)
+				l.deleteInstance(index, req)
 
 			}
 		}(instance)
 
 	}
 
-
 	// Start the emergency channel worker here
 	go l.relieveEmergencyChannel()
-
 
 	go l.recovery()
 
@@ -212,18 +202,16 @@ func (l *LoadBalancer) Start() {
 
 }
 
-
 // DONE: need to change the way we handle requests to use the local channels of every instance
 // we will just dump the pair of response writer and request to the channel of the node
 // the health check will be done locally in the node
 func (l *LoadBalancer) ServeHTTP(res http.ResponseWriter, r *http.Request) {
 
-
 	if l.Mode == RECOVERY_MODE {
-		
+
 		// we will do a response for no service available
-		// TODO: setup response for no service 
-		return 
+		// TODO: setup response for no service
+		return
 	}
 
 	// moving to the next channel
@@ -233,26 +221,25 @@ func (l *LoadBalancer) ServeHTTP(res http.ResponseWriter, r *http.Request) {
 
 	// dumping the res a r to the instance's local channel
 	l.Instances[next].WaitingList <- struct {
-		res http.ResponseWriter
-		r   *http.Request
+		res      http.ResponseWriter
+		r        *http.Request
 		finished chan bool
 	}{
-		res: res,
-		r:   r,
+		res:      res,
+		r:        r,
 		finished: finished,
 	}
 
 	// DONE: create a channel to receive to finishing of request handling
 
 	select {
-	case <- finished:
-	return
+	case <-finished:
+		return
 	}
 
 }
 
-
-func (l *LoadBalancer) deleteInstance( index int, req *WaitingRequest) {
+func (l *LoadBalancer) deleteInstance(index int, req *WaitingRequest) {
 
 	log.Printf("Removing the instance")
 
@@ -260,17 +247,17 @@ func (l *LoadBalancer) deleteInstance( index int, req *WaitingRequest) {
 		log.Fatal("Error in instances management")
 	}
 
-	// close the waiting list for the dead instance 
+	// close the waiting list for the dead instance
 	close(l.Instances[index].WaitingList)
 
 	// starting with the uncompleted request first
 	if req != nil {
 		l.EmergencyChan <- *req
 	}
-	
+
 	// emptying the waiting list in the emergency channel for the load balancer redistribute
 	for item := range l.Instances[index].WaitingList {
-		l.EmergencyChan <- item 
+		l.EmergencyChan <- item
 	}
 
 	l.DeadInstancesMutex.Lock()
@@ -279,7 +266,7 @@ func (l *LoadBalancer) deleteInstance( index int, req *WaitingRequest) {
 	l.DeadInstances = append(l.DeadInstances, l.Instances[index])
 
 	l.DeadInstancesMutex.Unlock()
-	// deleting the instance 
+	// deleting the instance
 	l.InstancesMutex.Lock()
 
 	if len(l.Instances) == 1 {
@@ -291,25 +278,24 @@ func (l *LoadBalancer) deleteInstance( index int, req *WaitingRequest) {
 	}
 
 	l.InstancesMutex.Unlock()
-	
+
 	l.Strategy.UpdateTotal(len(l.Instances))
 
 }
 
-
-// DONE: add a function to take care of the emergency channel 
+// DONE: add a function to take care of the emergency channel
 func (l *LoadBalancer) relieveEmergencyChannel() {
 
 	for req := range l.EmergencyChan {
 		next := l.Strategy.Next()
-		// We pass the packet to another waiting list 
+		// We pass the packet to another waiting list
 		l.Instances[next].WaitingList <- struct {
-			res http.ResponseWriter
-			r   *http.Request
+			res      http.ResponseWriter
+			r        *http.Request
 			finished chan bool
 		}{
-			res: req.res,
-			r:   req.r,
+			res:      req.res,
+			r:        req.r,
 			finished: req.finished,
 		}
 		log.Printf("Request recovered and passed to instance %s", l.Instances[next].Url)
@@ -317,8 +303,7 @@ func (l *LoadBalancer) relieveEmergencyChannel() {
 
 }
 
-
-// This function will health-check all dead instances for any recovery 
+// This function will health-check all dead instances for any recovery
 func (l *LoadBalancer) recovery() {
 
 	for {
@@ -331,13 +316,13 @@ func (l *LoadBalancer) recovery() {
 			conn, err := net.DialTimeout("tcp", ins.Url.Host, 2*time.Second)
 
 			if err != nil {
-				// if the instance still not responding we will continue 
+				// if the instance still not responding we will continue
 				continue
 			}
-			
+
 			conn.Close()
-			// we need to create another channel because we closed it before 
-			
+			// we need to create another channel because we closed it before
+
 			l.DeadInstancesMutex.Lock()
 
 			if len(l.DeadInstances) == 1 {
@@ -347,7 +332,6 @@ func (l *LoadBalancer) recovery() {
 			} else {
 				l.DeadInstances = append(l.DeadInstances[:i], l.DeadInstances[i+1:]...)
 			}
- 
 
 			l.DeadInstancesMutex.Unlock()
 
@@ -355,7 +339,6 @@ func (l *LoadBalancer) recovery() {
 
 			l.InstancesMutex.Lock()
 
-			
 			l.Instances = append(l.Instances, ins)
 			if len(l.Instances) == 1 {
 				l.Mode = NORMAL_MODE
@@ -366,7 +349,7 @@ func (l *LoadBalancer) recovery() {
 					// handle instance failure
 					// DONE: copy the request over to serve them in the other nodes
 
-					l.deleteInstance( len(l.Instances)-1, req)
+					l.deleteInstance(len(l.Instances)-1, req)
 
 				}
 			}(ins)
@@ -379,6 +362,3 @@ func (l *LoadBalancer) recovery() {
 	}
 
 }
-
-
-
